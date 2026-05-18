@@ -67,6 +67,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+#include <dirent.h>
 #include <sys/mman.h>
 #include <linux/input.h>
 #include <linux/uinput.h>
@@ -117,6 +118,7 @@ struct {
 	{  21,     KEY_T  },   // Button 6
 	{  19,     KEY_2  },   // Button Start P2
 	{  26,     KEY_6  },   // Button Coins/Credits P2
+	{  14,     KEY_ESC },   // Button Escape
 	// Button to halt system on pin 15 -> sudo halt
 	{  15, 	   KEY_0 },    // Button to halt system -> sudo halt
 	// For credit/start/etc., use USB keyboard or add more buttons.
@@ -171,15 +173,41 @@ volatile unsigned int
   *gpio;                             // GPIO register table
 const int
    debounceTime = 20;                // 20 ms for button debouncing
+int
+   gpio_base    = 0;                 // Sysfs GPIO base offset (0 on old kernels, 512+ on kernel 6.x)
 
 
 // Some utility functions ------------------------------------------------
+
+// Detect sysfs GPIO base offset — on kernel 6.x gpiochip numbering starts at 512+
+static int detectGpioBase(void) {
+	DIR *d = opendir("/sys/class/gpio");
+	if(!d) return 0;
+	struct dirent *e;
+	while((e = readdir(d))) {
+		if(strncmp(e->d_name, "gpiochip", 8)) continue;
+		char path[80], label[64];
+		snprintf(path, sizeof(path), "/sys/class/gpio/%s/label", e->d_name);
+		FILE *fp = fopen(path, "r");
+		if(!fp) continue;
+		int got = fread(label, 1, sizeof(label)-1, fp);
+		fclose(fp);
+		label[got] = 0;
+		if(strstr(label, "pinctrl-bcm2835") || strstr(label, "pinctrl-bcm2711")) {
+			snprintf(path, sizeof(path), "/sys/class/gpio/%s/base", e->d_name);
+			fp = fopen(path, "r");
+			if(fp) { int base; fscanf(fp, "%d", &base); fclose(fp); closedir(d); return base; }
+		}
+	}
+	closedir(d);
+	return 0;
+}
 
 // Set one GPIO pin attribute through the Sysfs interface.
 int pinConfig(int pin, char *attr, char *value) {
 	char filename[50];
 	int  fd, w, len = strlen(value);
-	sprintf(filename, "%s/gpio%d/%s", sysfs_root, pin, attr);
+	sprintf(filename, "%s/gpio%d/%s", sysfs_root, gpio_base + pin, attr);
 	if((fd = open(filename, O_WRONLY)) < 0) return -1;
 	w = write(fd, value, len);
 	close(fd);
@@ -229,8 +257,18 @@ static int boardType(void) {
 	char  buf[1024], *ptr;
 	int   n, board = 1; // Assume Pi1 Rev2 by default
 
-	// Relies on info in /proc/cmdline.  If this becomes unreliable
-	// in the future, alt code below uses /proc/cpuinfo if any better.
+	// Try /proc/device-tree/soc/ranges first (reliable on kernel 5+)
+	if((fp = fopen("/proc/device-tree/soc/ranges", "rb"))) {
+		unsigned char ranges[8];
+		if(fread(ranges, 1, 8, fp) == 8) {
+			unsigned int base = (ranges[4]<<24)|(ranges[5]<<16)|(ranges[6]<<8)|ranges[7];
+			if(base == 0x3F000000 || base == 0xFE000000)
+				board = 2;
+		}
+		fclose(fp);
+		return board;
+	}
+	// Fall back to /proc/cmdline for older firmware
 #if 1
 	if((fp = fopen("/proc/cmdline", "r"))) {
 		while(fgets(buf, sizeof(buf), fp)) {
@@ -317,6 +355,7 @@ int main(int argc, char *argv[]) {
 	// If this is a "Revision 1" Pi board (no mounting holes),
 	// remap certain pin numbers in the io[] array for compatibility.
 	// This way the code doesn't need modification for old boards.
+	gpio_base = detectGpioBase();
 	board = boardType();
 	if(board == 0) {
 		for(i=0; io[i].pin >= 0; i++) {
@@ -367,7 +406,7 @@ int main(int argc, char *argv[]) {
 	if((fd = open(buf, O_WRONLY)) < 0) // Open Sysfs export file
 		err("Can't open GPIO export file");
 	for(i=j=0; io[i].pin >= 0; i++) { // For each pin of interest...
-		sprintf(buf, "%d", io[i].pin);
+		sprintf(buf, "%d", gpio_base + io[i].pin);
 		write(fd, buf, strlen(buf));             // Export pin
 		pinConfig(io[i].pin, "active_low", "0"); // Don't invert
 		if(io[i].key == GND) {
@@ -382,7 +421,7 @@ int main(int argc, char *argv[]) {
 				err("Pin config failed");
 			// Get initial pin value
 			sprintf(buf, "%s/gpio%d/value",
-			  sysfs_root, io[i].pin);
+			  sysfs_root, gpio_base + io[i].pin);
 			// The p[] file descriptor array isn't necessarily
 			// aligned with the io[] array.  GND keys in the
 			// latter are skipped, but p[] requires contiguous
