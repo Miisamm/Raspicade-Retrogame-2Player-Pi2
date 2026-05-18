@@ -157,7 +157,7 @@ struct {
 // Also key auto-repeat times are set here.  This is for navigating the
 // game menu using the 'gamera' utility; MAME disregards key repeat
 // events (as it should).
-const unsigned long vulcanMask = (1L << 13);  // Coin P1 held alone
+const unsigned long vulcanMask = (1L << 11);  // Coin P1 (GPIO 13) is at io[] index 11
 const int           vulcanKey  = KEY_ESC, // Keycode to send
                     vulcanTime = 2000,    // Pinch time in milliseconds
                     repTime1   = 500,     // Key hold time to begin repeat
