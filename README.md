@@ -1,113 +1,127 @@
-Adafruit-Retrogame
-==================
+Raspicade-Retrogame-2Player-Pi2
+===============================
 
-Raspberry Pi GPIO-to-USB utility for classic game emulators.
+Raspberry Pi GPIO-to-USB utility for classic game emulators — 2-player arcade cabinet version.
 
-How-to: http://learn.adafruit.com/retro-gaming-with-raspberry-pi
+Based on [Adafruit Retrogame](https://github.com/adafruit/Adafruit-Retrogame), extended for 2-player wiring.
 
-Pre-built version supports the default pin/key mapping shown in the tutorial. For other layouts, edit retrogame.c.
+> **This fork adds kernel 6.x compatibility.** The original code broke silently on Linux 6.x (Debian Bookworm/Trixie) due to a GPIO sysfs base offset change. See [Kernel 6.x Fix](#kernel-6x-fix) below.
 
-Retrogame2PlayersPi2
-===================
+---
 
-Raspberry Pi GPIO-to-USB utility for classic game emulators.
+## Compilation
 
-Compilation
-===========
+```bash
+git clone https://github.com/Miisamm/Raspicade-Retrogame-2Player-Pi2.git
+cd Raspicade-Retrogame-2Player-Pi2
+make
+```
 
-````
-$ git clone https://github.com/ian57/Raspicade-Retrogame-2Player-Pi2.git
-$ cd Raspicade-Retrogame-2Player-Pi2
-$ make
-````
+Requires `gcc` and standard build tools (`sudo apt install build-essential`).
 
-Pinout Mapping
-==============
+---
 
-````
-Player 1 :
-GPIO 02 -> KEY_UP       // Up
-GPIO 03 -> KEY_DOWN     // Down
-GPIO 04 -> KEY_LEFT     // Left Joystick (4 pins)
-GPIO 17 -> KEY_RIGHT    // Right
-GPIO 27 -> KEY_LEFTCTRL // Button 1
-GPIO 22 -> KEY_LEFTALT  // Button 2
-GPIO 10 -> KEY_SPACE    // Button 3
-GPIO 09 -> KEY_LEFTSHIFT// Button 4
-GPIO 11 -> KEY_Z        // Button 5
-GPIO 05 -> KEY_X }      // Button 6
-GPIO 06 -> KEY_1        // Button Start P1
-GPIO 13 -> KEY_5        // Button Coins/Credits P1
+## Installation
 
-Player 2 :
-GPIO 18 -> KEY_R        // Up
-GPIO 23 -> KEY_F        // Down
-GPIO 24 -> KEY_D        // Left Joystick (4 pins)
-GPIO 25 -> KEY_G        // Right
-GPIO 08 -> KEY_A        // Button 1
-GPIO 07 -> KEY_S        // Button 2
-GPIO 12 -> KEY_Q        // Button 3
-GPIO 16 -> KEY_W        // Button 4
-GPIO 20 -> KEY_E        // Button 5
-GPIO 21 -> KEY_T        // Button 6
-GPIO 19 -> KEY_2        // Button Start P2
-GPIO 26 -> KEY_6        // Button Coins/Credits P2
-GPIO 15 -> KEY_0        // Button to Halt System -> "sudo halt" is launch
-````
+Retrogame requires the `uinput` kernel module. To enable it persistently:
 
-Maintaining Start P1 + Coins/Credits P1 more than 1 seconds will produce "KEY_ESC" (Escape Key).
-
-Installation
-============
-
-Now we have configure to allow retrogame to work and be launched at startup. As in http://learn.adafruit.com/retro-gaming-with-raspberry-pi/buttons, you make
-
-Retrogame requires the uinput kernel module. This is already present on the system but isn't enabled by default. For testing, you can type:
-
-````
-sudo modprobe uinput
-````
-
-To make this persistent between reboots, append a line to /etc/modules (or edit the file) :
-
-````
+```bash
 sudo sh -c 'echo uinput >> /etc/modules'
-````
+sudo modprobe uinput
+```
 
-Now we're in good shape to test it! Retrogame needs to be run as root (need access to memory), i.e.:
+### Autostart with systemd (recommended)
 
-````
-sudo ./retrogame
-````
+Create `/etc/systemd/system/retrogame.service`:
 
-Give it a try. If it seems to be working, press control+C to stop the program and we'll then set up the system to launch this automatically in the background at startup.
+```ini
+[Unit]
+Description=Retrogame GPIO joystick daemon
+After=local-fs.target
 
-````
-sudo nano /etc/rc.local
-````
+[Service]
+Type=simple
+ExecStart=/home/pi/Raspicade-Retrogame-2Player-Pi2/retrogame
+Restart=on-failure
 
-Before the final "exit 0" line, insert this line:
+[Install]
+WantedBy=multi-user.target
+```
 
-````
+Then enable it:
+
+```bash
+sudo systemctl enable retrogame
+sudo systemctl start retrogame
+```
+
+### Legacy rc.local method
+
+Add this line to `/etc/rc.local` before `exit 0`:
+
+```bash
 /home/pi/Raspicade-Retrogame-2Player-Pi2/retrogame &
+```
 
-````
-If you placed the software in a different location, this line should be changed accordingly. "sudo" isn't necessary here because the rc.local script is already run as root.
+---
 
-Reboot the system to test the startup function:
+## Pinout Mapping
 
-````
-sudo reboot
-````
+```
+Player 1:
+  GPIO 02 -> KEY_UP          Up
+  GPIO 03 -> KEY_DOWN        Down
+  GPIO 04 -> KEY_LEFT        Left
+  GPIO 17 -> KEY_RIGHT       Right
+  GPIO 27 -> KEY_LEFTCTRL    Button 1
+  GPIO 22 -> KEY_LEFTALT     Button 2
+  GPIO 10 -> KEY_SPACE       Button 3
+  GPIO 09 -> KEY_LEFTSHIFT   Button 4
+  GPIO 11 -> KEY_Z           Button 5
+  GPIO 05 -> KEY_X           Button 6
+  GPIO 06 -> KEY_1           Start P1
+  GPIO 13 -> KEY_5           Coins/Credits P1
 
-The software will now be patiently waiting in the background, ready for use with any emulators.
+Player 2:
+  GPIO 18 -> KEY_R           Up
+  GPIO 23 -> KEY_F           Down
+  GPIO 24 -> KEY_D           Left
+  GPIO 25 -> KEY_G           Right
+  GPIO 08 -> KEY_A           Button 1
+  GPIO 07 -> KEY_S           Button 2
+  GPIO 12 -> KEY_Q           Button 3
+  GPIO 16 -> KEY_W           Button 4
+  GPIO 20 -> KEY_E           Button 5
+  GPIO 21 -> KEY_T           Button 6
+  GPIO 19 -> KEY_2           Start P2
+  GPIO 26 -> KEY_6           Coins/Credits P2
 
-Each emulator will have its own method for configuring keyboard input. Set them up so the keys match your controller outputs. Up/down/left/right from the arrow keys is a pretty common default among these programs, but the rest will usually require some tweaking.
+System:
+  GPIO 15 -> KEY_0           Halt system (triggers sudo halt)
+```
 
-Arcade Wiring
-=============
+Holding **Start P1 + Coins P1** for more than 1 second sends **KEY_ESC**.
 
-See https://github.com/ian57/Raspicade-Retrogame-2Player-BPlus/wiki
+All buttons connect between the GPIO pin and GND. Internal pullups are used — no resistors needed.
 
+---
 
+## Kernel 6.x Fix
 
+On Linux kernel 6.x, the BCM2835/BCM2711 GPIO chip (`pinctrl-bcm2835`) no longer appears at sysfs base offset 0. It moves to a higher offset (typically 512 on Pi 3/4), causing all GPIO sysfs exports to silently target the wrong chip — buttons appear to do nothing.
+
+Additionally, the original Pi board detection relied on `mem_size=` in `/proc/cmdline`, which was removed in kernel 6.x.
+
+**This fork fixes both issues:**
+
+1. `detectGpioBase()` — scans `/sys/class/gpio/gpiochip*/label` to find the `pinctrl-bcm2835` or `pinctrl-bcm2711` chip and reads its actual base offset dynamically. Works on all kernel versions.
+
+2. `boardType()` — reads the SoC peripheral base address from `/proc/device-tree/soc/ranges` instead of parsing `/proc/cmdline`. More reliable across kernel versions.
+
+**Tested on:** Raspberry Pi 3 Model B, Linux 6.12, Debian Trixie + RetroPie 4.8
+
+---
+
+## Arcade Wiring
+
+See the original [Raspicade wiki](https://github.com/ian57/Raspicade-Retrogame-2Player-BPlus/wiki) for wiring diagrams.
